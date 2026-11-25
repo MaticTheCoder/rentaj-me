@@ -36,6 +36,13 @@ export default defineConfig(() => {
       // Testi komponent tečejo v jsdom (simuliran brskalnik); setup.js po vsakem testu počisti DOM.
       environment: 'jsdom',
       setupFiles: ['tests/setup.js'],
+      // Poročilo o pokritosti (npm run test:coverage); v CI se shrani kot artefakt.
+      coverage: {
+        provider: 'v8',
+        include: ['src/**/*.{js,jsx}'],
+        reporter: ['text-summary', 'html', 'lcov'],
+        reportsDirectory: 'coverage',
+      },
     },
   };
 });

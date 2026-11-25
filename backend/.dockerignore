@@ -1,3 +1,4 @@
 node_modules
 src/generated
 npm-debug.log*
+coverage

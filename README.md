@@ -1,5 +1,9 @@
 # Rentaj.me
 
+[![CI/CD](https://github.com/MaticTheCoder/rentaj-me/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/MaticTheCoder/rentaj-me/actions/workflows/ci-cd.yml)
+
+**Nameščena aplikacija:** <NAMESCENA_APLIKACIJA> (prijava s [testnimi računi](#testni-računi))
+
 Spletni sistem za izposojo opreme na oddelku za tehniko.
 
 Študenti, asistenti in profesorji v katalogu poiščejo opremo (mikrokrmilnike, senzorje, merilne instrumente, kamere, VR očala, 3D tiskalnike …), preverijo njeno zasedenost in oddajo rezervacijo. Tehnik oddelka rezervacije odobrava, opremo izdaja in prevzema ter beleži njeno stanje in morebitne poškodbe. Sistem samodejno prikaže zamujena vračila, administrator pa upravlja uporabnike, kategorije opreme in pravila izposoje.
@@ -20,7 +24,7 @@ Spletni sistem za izposojo opreme na oddelku za tehniko.
 ```
 ├── frontend/   # React aplikacija
 ├── backend/    # Express REST API
-├── .github/    # CI (GitHub Actions)
+├── .github/    # CI/CD (GitHub Actions)
 └── docs/       # dokumentacija projekta
 ```
 
@@ -120,7 +124,30 @@ npm run format        # Prettier popravi oblikovanje
 
 Frontend ima enake ukaze (`npm test`, `npm run lint`, `npm run format`) v mapi `frontend/`; testi ne potrebujejo baze.
 
-Ob vsakem pull requestu na `main` GitHub Actions poženejo lint, preverjanje oblikovanja in teste za backend in frontend ter build frontenda.
+Poročilo o pokritosti: `npm run test:coverage` (v `backend/` oziroma `frontend/`) ga zapiše v mapo `coverage/`.
+
+## CI/CD
+
+Cevovod [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) se sproži ob vsakem pull requestu v `main` in ob vsakem pushu na `main`. Spremembe se razvijajo v ločenih vejah in v `main` združujejo prek pull requestov; zaščita veje `main` zahteva uspešne jobe `lint`, `build` in `test`.
+
+| Faza | Kaj naredi |
+|---|---|
+| `lint` | ESLint in Prettier za backend in frontend. Ob napaki job pade. |
+| `build` | Zgradi frontend (`dist/`) in produkcijsko Docker sliko backenda ([`backend/Dockerfile.prod`](backend/Dockerfile.prod)) ter oboje shrani kot artefakta. Odvisnosti npm in sloji Docker slike se predpomnijo. |
+| `test` | Backend (s PostgreSQL) in frontend testi s pokritostjo; poročilo se shrani kot artefakt `coverage`. Ob padlem testu pade cevovod. |
+| `deploy` | Samo ob pushu na `main`, ko so `lint`, `build` in `test` uspešni, v okolju `production`. Sliko backenda iz artefakta potisne v GHCR in jo namesti na Render (baza na Neon), `dist/` pa naloži na Netlify. Netlify zahteve `/api/*` posreduje backendu na naslovu iz spremenljivke `BACKEND_URL`. |
+
+Namestitev uporablja te nastavitve okolja `production` (Settings → Environments):
+
+| Ime | Vrsta | Vrednost |
+|---|---|---|
+| `NETLIFY_AUTH_TOKEN` | secret | Netlify personal access token |
+| `NETLIFY_SITE_ID` | secret | ID strani na Netlify |
+| `RENDER_DEPLOY_HOOK_URL` | secret | Deploy hook storitve na Render |
+| `BACKEND_URL` | variable | Javni naslov backenda na Render, npr. `https://rentaj-me-backend.onrender.com` |
+| `FRONTEND_URL` | variable | Javni naslov frontenda na Netlify |
+
+Na Render so nastavljene spremenljivke `DATABASE_URL` (Neon), `JWT_SECRET`, `NODE_ENV=production` in `SEED_OB_ZAGONU=true`, ki ob zagonu naloži testne račune. Brezplačna storitev na Render po neaktivnosti zaspi, zato prva zahteva traja do minute.
 
 ## Dokumentacija
 
