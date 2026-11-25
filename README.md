@@ -2,7 +2,7 @@
 
 [![CI/CD](https://github.com/MaticTheCoder/rentaj-me/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/MaticTheCoder/rentaj-me/actions/workflows/ci-cd.yml)
 
-**Nameščena aplikacija:** <NAMESCENA_APLIKACIJA> (prijava s [testnimi računi](#testni-računi))
+**Nameščena aplikacija:** <https://rentaj-me.vercel.app> (prijava s [testnimi računi](#testni-računi))
 
 Spletni sistem za izposojo opreme na oddelku za tehniko.
 
