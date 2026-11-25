@@ -223,28 +223,33 @@ jobs:
           echo "::error::Backend na $BACKEND_URL ni odgovoril."
           exit 1
 
-      # Frontend: dist iz build se naloži na Netlify. _redirects posreduje /api nameščenemu
+      # Frontend: dist iz build se naloži na Vercel. vercel.json posreduje /api nameščenemu
       # backendu (kot proxy v Vite, ADR-0012), zato piškotek z JWT ostane na istem naslovu.
+      # Mapa se imenuje rentaj-me, ker Vercel po njej poimenuje (in ob prvem deployu ustvari) projekt.
       - name: Poveži frontend z backendom
         env:
           BACKEND_URL: ${{ vars.BACKEND_URL }}
         run: |
           test -n "$BACKEND_URL" || { echo "::error::Manjka spremenljivka BACKEND_URL."; exit 1; }
-          cat > artefakti/frontend-dist/_redirects <<EOF
-          /api/*  ${BACKEND_URL%/}/api/:splat  200
-          /*      /index.html                 200
+          mv artefakti/frontend-dist rentaj-me
+          cat > rentaj-me/vercel.json <<EOF
+          {
+            "rewrites": [
+              { "source": "/api/:pot*", "destination": "${BACKEND_URL%/}/api/:pot*" },
+              { "source": "/(.*)", "destination": "/index.html" }
+            ]
+          }
           EOF
-          cat artefakti/frontend-dist/_redirects
+          cat rentaj-me/vercel.json
 
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Namesti frontend na Netlify
+      - name: Namesti frontend na Vercel
         env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-        run: >-
-          npx --yes netlify-cli@27.20.1 deploy --prod --no-build
-          --dir artefakti/frontend-dist
-          --message "${{ github.sha }}"
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TELEMETRY_DISABLED: '1'
+        run: |
+          test -n "$VERCEL_TOKEN" || { echo "::error::Manjka secret VERCEL_TOKEN v okolju production."; exit 1; }
+          npx --yes vercel@66.6.0 deploy rentaj-me --prod --yes --token "$VERCEL_TOKEN"

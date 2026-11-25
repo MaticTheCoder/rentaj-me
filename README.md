@@ -135,17 +135,16 @@ Cevovod [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) se sproži 
 | `lint` | ESLint in Prettier za backend in frontend. Ob napaki job pade. |
 | `build` | Zgradi frontend (`dist/`) in produkcijsko Docker sliko backenda ([`backend/Dockerfile.prod`](backend/Dockerfile.prod)) ter oboje shrani kot artefakta. Odvisnosti npm in sloji Docker slike se predpomnijo. |
 | `test` | Backend (s PostgreSQL) in frontend testi s pokritostjo; poročilo se shrani kot artefakt `coverage`. Ob padlem testu pade cevovod. |
-| `deploy` | Samo ob pushu na `main`, ko so `lint`, `build` in `test` uspešni, v okolju `production`. Sliko backenda iz artefakta potisne v GHCR in jo namesti na Render (baza na Neon), `dist/` pa naloži na Netlify. Netlify zahteve `/api/*` posreduje backendu na naslovu iz spremenljivke `BACKEND_URL`. |
+| `deploy` | Samo ob pushu na `main`, ko so `lint`, `build` in `test` uspešni, v okolju `production`. Sliko backenda iz artefakta potisne v GHCR in jo namesti na Render (baza na Neon), `dist/` pa naloži na Vercel. Vercel zahteve `/api/*` posreduje backendu na naslovu iz spremenljivke `BACKEND_URL`. |
 
 Namestitev uporablja te nastavitve okolja `production` (Settings → Environments):
 
 | Ime | Vrsta | Vrednost |
 |---|---|---|
-| `NETLIFY_AUTH_TOKEN` | secret | Netlify personal access token |
-| `NETLIFY_SITE_ID` | secret | ID strani na Netlify |
+| `VERCEL_TOKEN` | secret | Vercel access token (projekt `rentaj-me` se ob prvem deployu ustvari sam) |
 | `RENDER_DEPLOY_HOOK_URL` | secret | Deploy hook storitve na Render |
 | `BACKEND_URL` | variable | Javni naslov backenda na Render, npr. `https://rentaj-me-backend.onrender.com` |
-| `FRONTEND_URL` | variable | Javni naslov frontenda na Netlify |
+| `FRONTEND_URL` | variable | Javni naslov frontenda na Vercel |
 
 Na Render so nastavljene spremenljivke `DATABASE_URL` (Neon), `JWT_SECRET`, `NODE_ENV=production` in `SEED_OB_ZAGONU=true`, ki ob zagonu naloži testne račune. Brezplačna storitev na Render po neaktivnosti zaspi, zato prva zahteva traja do minute.
 
