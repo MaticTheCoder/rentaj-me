@@ -100,3 +100,6 @@ export function kratekDatum(datum) {
   const [, mesec, dan] = razcleni(datum);
   return `${dan}. ${mesec}.`;
 }
+
+// Namerna napaka linterja za preverjanje zaščite veje main.
+const neuporabljena = 42;
