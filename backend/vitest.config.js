@@ -12,5 +12,12 @@ export default defineConfig({
       JWT_SECRET: process.env.JWT_SECRET ?? 'testna-skrivnost',
       NODE_ENV: 'test',
     },
+    // Poročilo o pokritosti (npm run test:coverage); v CI se shrani kot artefakt.
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.js'],
+      reporter: ['text-summary', 'html', 'lcov'],
+      reportsDirectory: 'coverage',
+    },
   },
 });

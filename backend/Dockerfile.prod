@@ -1,0 +1,27 @@
+# Produkcijska slika za backend (namestitev na Render prek CI/CD). Za razliko od razvojne slike
+# (Dockerfile, ADR-0011) vsebuje kodo in generiran Prisma odjemalec ter teče brez --watch.
+# Sliko zgradi job build, deploy pa jo le naloži v GHCR in sproži namestitev.
+FROM node:24-alpine
+
+ENV NODE_ENV=production \
+    PRISMA_HIDE_UPDATE_MESSAGE=true \
+    TZ=Europe/Ljubljana
+
+WORKDIR /app
+
+RUN chown node:node /app
+USER node
+
+# Vključno z razvojnimi odvisnostmi: prisma CLI je potreben za migrate deploy ob zagonu.
+COPY --chown=node:node package.json package-lock.json ./
+RUN npm ci --include=dev && npm cache clean --force
+
+COPY --chown=node:node . .
+# generate se na bazo ne poveže, prisma.config.js pa zahteva DATABASE_URL.
+RUN DATABASE_URL=postgresql://gradnja@localhost/gradnja npx prisma generate
+
+EXPOSE 3000
+
+# Ob zagonu uveljavi migracije. Z SEED_OB_ZAGONU=true naloži še začetne podatke (idempotentno),
+# da so na nameščeni aplikaciji na voljo testni računi.
+CMD ["sh", "-c", "npx prisma migrate deploy && if [ \"$SEED_OB_ZAGONU\" = \"true\" ]; then npx prisma db seed; fi && node src/server.js"]
