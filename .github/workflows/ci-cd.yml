@@ -1,0 +1,250 @@
+name: CI/CD
+
+# Ob vsakem pull requestu v main se izvedejo lint, build in test. Ob pushu na main (združitev
+# pull requesta) se po uspešnih treh jobih aplikacija še namesti (deploy).
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  # Na main ne prekinjamo teka, da se namestitev ne ustavi na pol.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 24
+  PRISMA_HIDE_UPDATE_MESSAGE: 'true'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # Predpomnjenje npm (~/.npm) po obeh package-lock.json.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Namesti odvisnosti
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix frontend
+
+      - name: ESLint – backend
+        run: npm run lint --prefix backend
+      - name: ESLint – frontend
+        run: npm run lint --prefix frontend
+
+      - name: Prettier – backend
+        run: npm run format:check --prefix backend
+      - name: Prettier – frontend
+        run: npm run format:check --prefix frontend
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend – namesti odvisnosti
+        run: npm ci --prefix frontend
+
+      - name: Frontend – build
+        run: npm run build --prefix frontend
+
+      - name: Shrani frontend (dist)
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+      # Backend se zgradi kot produkcijska Docker slika (Dockerfile.prod). Sloji se predpomnijo
+      # v GitHub Actions cache, slika pa se shrani kot artefakt, ki ga deploy le naloži.
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Backend – build Docker slike
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          file: backend/Dockerfile.prod
+          tags: rentaj-me-backend:${{ github.sha }}
+          outputs: type=docker,dest=${{ runner.temp }}/backend-image.tar
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Shrani backend (Docker slika)
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-image
+          path: ${{ runner.temp }}/backend-image.tar
+          retention-days: 7
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Backend testi potrebujejo PostgreSQL; globalSetup ustvari testno bazo in uveljavi migracije.
+    services:
+      db:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: rentaj
+          POSTGRES_PASSWORD: rentaj
+          POSTGRES_DB: rentaj
+          TZ: Europe/Ljubljana
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rentaj -d rentaj"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://rentaj:rentaj@localhost:5432/rentaj
+      TEST_DATABASE_URL: postgresql://rentaj:rentaj@localhost:5432/rentaj_test
+      JWT_SECRET: ci-testna-skrivnost
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Namesti odvisnosti
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix frontend
+
+      - name: Backend – Prisma odjemalec
+        run: npx prisma generate
+        working-directory: backend
+
+      - name: Backend – testi s pokritostjo
+        run: npm run test:coverage --prefix backend
+      - name: Frontend – testi s pokritostjo
+        run: npm run test:coverage --prefix frontend
+
+      - name: Shrani poročilo o pokritosti
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: |
+            backend/coverage
+            frontend/coverage
+          retention-days: 14
+
+  deploy:
+    needs: [lint, build, test]
+    # Samo ob pushu na main (združitev pull requesta), nikoli ob pull requestu.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: ${{ vars.FRONTEND_URL }}
+    permissions:
+      contents: read
+      packages: write # potiskanje slike v GHCR
+    env:
+      # Ime slike v GHCR mora biti z malimi črkami.
+      SLIKA: ghcr.io/${{ github.repository_owner }}/rentaj-me-backend
+    steps:
+      - name: Prenesi artefakte iz build
+        uses: actions/download-artifact@v8
+        with:
+          path: artefakti
+
+      # Backend: slika iz build se le naloži in potisne v GHCR – ne gradi se ponovno.
+      - name: Naloži Docker sliko
+        run: docker load --input artefakti/backend-image/backend-image.tar
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Potisni sliko v GHCR
+        id: slika
+        run: |
+          SLIKA="${SLIKA,,}"
+          docker tag "rentaj-me-backend:${GITHUB_SHA}" "$SLIKA:${GITHUB_SHA}"
+          docker tag "rentaj-me-backend:${GITHUB_SHA}" "$SLIKA:latest"
+          docker push "$SLIKA:${GITHUB_SHA}"
+          docker push "$SLIKA:latest"
+          echo "url=$SLIKA:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Namesti backend na Render
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          SLIKA_URL: ${{ steps.slika.outputs.url }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "::error::Manjka secret RENDER_DEPLOY_HOOK_URL v okolju production."
+            exit 1
+          fi
+          curl --fail --silent --show-error --get "$RENDER_DEPLOY_HOOK_URL" \
+            --data-urlencode "imgURL=$SLIKA_URL"
+
+      - name: Počakaj, da backend odgovarja
+        env:
+          BACKEND_URL: ${{ vars.BACKEND_URL }}
+        run: |
+          # Render potrebuje nekaj minut za prenos slike in zagon (brezplačna storitev se tudi zbudi).
+          for i in $(seq 1 40); do
+            if curl --fail --silent "$BACKEND_URL/api/zdravje"; then exit 0; fi
+            sleep 15
+          done
+          echo "::error::Backend na $BACKEND_URL ni odgovoril."
+          exit 1
+
+      # Frontend: dist iz build se naloži na Netlify. _redirects posreduje /api nameščenemu
+      # backendu (kot proxy v Vite, ADR-0012), zato piškotek z JWT ostane na istem naslovu.
+      - name: Poveži frontend z backendom
+        env:
+          BACKEND_URL: ${{ vars.BACKEND_URL }}
+        run: |
+          test -n "$BACKEND_URL" || { echo "::error::Manjka spremenljivka BACKEND_URL."; exit 1; }
+          cat > artefakti/frontend-dist/_redirects <<EOF
+          /api/*  ${BACKEND_URL%/}/api/:splat  200
+          /*      /index.html                 200
+          EOF
+          cat artefakti/frontend-dist/_redirects
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Namesti frontend na Netlify
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: >-
+          npx --yes netlify-cli@27.20.1 deploy --prod --no-build
+          --dir artefakti/frontend-dist
+          --message "${{ github.sha }}"
